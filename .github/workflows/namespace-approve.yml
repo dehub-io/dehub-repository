@@ -11,7 +11,7 @@ jobs:
   approve-namespace:
     if: |
       github.event_name == 'issue_comment' &&
-      github.event.issue.labels.*.name contains 'namespace-request' &&
+      contains(github.event.issue.labels.*.name, 'namespace-request') &&
       startsWith(github.event.comment.body, '/approve')
     runs-on: ubuntu-latest
     permissions:
