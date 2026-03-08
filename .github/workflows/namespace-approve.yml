@@ -112,16 +112,25 @@ jobs:
           git commit -m "Add namespace: $NAMESPACE"
           git push -u origin namespace/$NAMESPACE
           
+          cat > /tmp/pr_body.md << 'PRBODY'
+          ## 命名空间申请
+          
+          - **命名空间**: NAMESPACE_PLACEHOLDER
+          - **所有者**: @OWNER_PLACEHOLDER
+          - **用途**: DESCRIPTION_PLACEHOLDER
+          - **申请 Issue**: #ISSUE_PLACEHOLDER
+          
+          合并此 PR 将激活命名空间。
+          PRBODY
+          
+          sed -i "s|NAMESPACE_PLACEHOLDER|$NAMESPACE|g" /tmp/pr_body.md
+          sed -i "s|OWNER_PLACEHOLDER|${{ steps.parse.outputs.owner }}|g" /tmp/pr_body.md
+          sed -i "s|DESCRIPTION_PLACEHOLDER|${{ steps.parse.outputs.description }}|g" /tmp/pr_body.md
+          sed -i "s|ISSUE_PLACEHOLDER|${{ github.event.issue.number }}|g" /tmp/pr_body.md
+          
           gh pr create \
             --title "Add namespace: $NAMESPACE" \
-            --body "## 命名空间申请
-
-- **命名空间**: $NAMESPACE
-- **所有者**: @${{ steps.parse.outputs.owner }}
-- **用途**: ${{ steps.parse.outputs.description }}
-- **申请 Issue**: #${{ github.event.issue.number }}
-
-合并此 PR 将激活命名空间。" \
+            --body-file /tmp/pr_body.md \
             --base main
 
       - name: Comment on issue
