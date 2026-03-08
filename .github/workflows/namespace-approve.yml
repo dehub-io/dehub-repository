@@ -137,11 +137,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue comment ${{ github.event.issue.number }} --body "✅ 命名空间申请已审核通过
-
-PR 已创建，等待合并: 请查看 Pull Requests 列表
-
-合并后将自动激活命名空间。"
+          cat > /tmp/comment.md << 'COMMENT'
+          ✅ 命名空间申请已审核通过
+          
+          PR 已创建，等待合并: 请查看 Pull Requests 列表
+          
+          合并后将自动激活命名空间。
+          COMMENT
+          
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/comment.md
 
   # PR 合并后激活命名空间并关闭 Issue
   activate-namespace:
@@ -199,14 +203,20 @@ PR 已创建，等待合并: 请查看 Pull Requests 列表
             --jq '.[0].number' 2>/dev/null || echo "")
           
           if [ -n "$ISSUE_NUMBER" ]; then
-            gh issue comment $ISSUE_NUMBER --body "🎉 命名空间 \`$NAMESPACE\` 已激活！
-
-你现在可以发布包到 \`$NAMESPACE/*\` 命名空间了。
-
-使用方法：
-\`\`\`bash
-dehub publish
-\`\`\`"
+            cat > /tmp/activate_comment.md << 'COMMENT'
+            🎉 命名空间 `NAMESPACE_PLACEHOLDER` 已激活！
+            
+            你现在可以发布包到 `NAMESPACE_PLACEHOLDER/*` 命名空间了。
+            
+            使用方法：
+            ```bash
+            dehub publish
+            ```
+            COMMENT
+            
+            sed -i "s|NAMESPACE_PLACEHOLDER|$NAMESPACE|g" /tmp/activate_comment.md
+            
+            gh issue comment $ISSUE_NUMBER --body-file /tmp/activate_comment.md
             
             gh issue close $ISSUE_NUMBER
           fi
