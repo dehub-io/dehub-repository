@@ -1,0 +1,194 @@
+name: Verify and Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: 'Draft Release ID'
+        required: true
+        type: string
+      package_name:
+        description: 'Package name (namespace/name)'
+        required: true
+        type: string
+      version:
+        description: 'Version'
+        required: true
+        type: string
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup tools
+        run: |
+          sudo apt-get install -y yq
+
+      - name: Validate permissions
+        id: validate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE="${{ inputs.package_name }}"
+          NAMESPACE=$(echo "$PACKAGE" | cut -d'/' -f1)
+          ACTOR="${{ github.actor }}"
+          
+          echo "::notice::Package: $PACKAGE"
+          echo "::notice::Namespace: $NAMESPACE"
+          echo "::notice::Actor: $ACTOR"
+          
+          # 检查命名空间是否存在
+          if [ ! -f "permissions.yaml" ]; then
+            echo "::error::权限配置文件 permissions.yaml 不存在"
+            exit 1
+          fi
+          
+          # 检查命名空间状态
+          STATUS=$(yq '.namespaces.'$NAMESPACE'.status // "not_found"' permissions.yaml)
+          
+          if [ "$STATUS" = "not_found" ]; then
+            echo "::error::命名空间 '$NAMESPACE' 不存在，请先申请"
+            exit 1
+          fi
+          
+          if [ "$STATUS" != "active" ]; then
+            echo "::error::命名空间 '$NAMESPACE' 状态为 '$STATUS'，无法发布"
+            exit 1
+          fi
+          
+          # 检查用户权限
+          OWNERS=$(yq '.namespaces.'$NAMESPACE'.owners[]' permissions.yaml 2>/dev/null || echo "")
+          MAINTAINERS=$(yq '.namespaces.'$NAMESPACE'.maintainers[]' permissions.yaml 2>/dev/null || echo "")
+          
+          HAS_PERMISSION=false
+          
+          if echo "$OWNERS" | grep -q "^${ACTOR}$"; then
+            HAS_PERMISSION=true
+            echo "::notice::用户 '$ACTOR' 是命名空间 '$NAMESPACE' 的 owner"
+          elif echo "$MAINTAINERS" | grep -q "^${ACTOR}$"; then
+            HAS_PERMISSION=true
+            echo "::notice::用户 '$ACTOR' 是命名空间 '$NAMESPACE' 的 maintainer"
+          fi
+          
+          if [ "$HAS_PERMISSION" = "false" ]; then
+            echo "::error::用户 '$ACTOR' 无权限发布到命名空间 '$NAMESPACE'"
+            echo "Owners: $OWNERS"
+            echo "Maintainers: $MAINTAINERS"
+            exit 1
+          fi
+          
+          echo "namespace=$NAMESPACE" >> $GITHUB_OUTPUT
+
+      - name: Check version exists
+        id: check_version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PACKAGE="${{ inputs.package_name }}"
+          VERSION="${{ inputs.version }}"
+          INDEX_FILE="packages/${PACKAGE}/index.json"
+          
+          if [ -f "$INDEX_FILE" ]; then
+            # 检查版本是否已存在
+            EXISTS=$(jq -r '.versions[] | select(.version == "'$VERSION'") | .version' "$INDEX_FILE" 2>/dev/null || echo "")
+            
+            if [ -n "$EXISTS" ]; then
+              echo "::error::版本 '$VERSION' 已存在，无法覆盖"
+              exit 1
+            fi
+          fi
+          
+          echo "::notice::版本检查通过"
+
+      - name: Publish draft release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID="${{ inputs.release_id }}"
+          PACKAGE="${{ inputs.package_name }}"
+          VERSION="${{ inputs.version }}"
+          TAG="${PACKAGE}/${VERSION}"
+          
+          echo "Publishing release $RELEASE_ID with tag $TAG"
+          
+          # 更新 release：设置 tag_name 并发布
+          gh api repos/${{ github.repository }}/releases/$RELEASE_ID \
+            -X PATCH \
+            -F tag_name="$TAG" \
+            -F draft=false \
+            -F name="$TAG" \
+            -F generate_notes=true
+
+      - name: Update package index
+        if: success()
+        run: |
+          PACKAGE="${{ inputs.package_name }}"
+          VERSION="${{ inputs.version }}"
+          INDEX_FILE="packages/${PACKAGE}/index.json"
+          
+          mkdir -p "$(dirname $INDEX_FILE)"
+          
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/${PACKAGE}/${VERSION}"
+          
+          if [ -f "$INDEX_FILE" ]; then
+            # 追加新版本
+            jq --arg ver "$VERSION" \
+               --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+               --arg url "${RELEASE_URL}/package.tar.gz" \
+               '.versions += [{
+                 "version": $ver,
+                 "archive_url": $url,
+                 "release_date": $date
+               }]' "$INDEX_FILE" > tmp.json && mv tmp.json "$INDEX_FILE"
+          else
+            # 创建新索引
+            cat > "$INDEX_FILE" << INDEX
+          {
+            "schema_version": "1.0",
+            "package": "$PACKAGE",
+            "versions": [{
+              "version": "$VERSION",
+              "archive_url": "${RELEASE_URL}/package.tar.gz",
+              "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }]
+          }
+          INDEX
+          fi
+          
+          # 更新全局索引
+          if [ -f "index.json" ]; then
+            if ! jq -e '.packages | index("'"$PACKAGE"'")' index.json > /dev/null 2>&1; then
+              jq '.packages += ["'"$PACKAGE"'"] | .updated_at = "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"' index.json > tmp.json && mv tmp.json index.json
+            else
+              jq '.updated_at = "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"' index.json > tmp.json && mv tmp.json index.json
+            fi
+          fi
+          
+          echo "::notice::索引已更新"
+
+      - name: Commit changes
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.json packages/
+          git diff --cached --quiet || git commit -m "Add ${{ inputs.package_name }}/${{ inputs.version }}"
+          git push
+
+      - name: Delete draft release on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_ID="${{ inputs.release_id }}"
+          echo "Deleting draft release $RELEASE_ID due to verification failure"
+          gh api repos/${{ github.repository }}/releases/$RELEASE_ID -X DELETE || true

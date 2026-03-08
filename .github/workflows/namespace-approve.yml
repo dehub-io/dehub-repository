@@ -1,0 +1,203 @@
+name: Namespace Approval
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [closed]
+
+jobs:
+  # 处理 /approve 命令
+  approve-namespace:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.labels.*.name contains 'namespace-request' &&
+      startsWith(github.event.comment.body, '/approve')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Check admin permission
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ACTOR="${{ github.actor }}"
+          
+          # 检查用户是否有仓库写权限（作为管理员的判断条件）
+          HAS_WRITE=$(gh api repos/${{ github.repository }}/collaborators/$ACTOR/permission \
+            --jq '.permission == "write" or .permission == "admin"' 2>/dev/null || echo "false")
+          
+          if [ "$HAS_WRITE" != "true" ]; then
+            echo "::error::用户 '$ACTOR' 无管理员权限"
+            gh issue comment ${{ github.event.issue.number }} --body "❌ @$ACTOR 无权限执行此操作"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup tools
+        run: |
+          sudo apt-get install -y yq
+
+      - name: Parse issue
+        id: parse
+        run: |
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          
+          # 从 Issue body 解析字段
+          NAMESPACE=$(echo "$ISSUE_BODY" | grep -A1 "命名空间名称" | tail -1 | sed 's/^[[:space:]]*//' | tr -d '\r')
+          OWNER=$(echo "$ISSUE_BODY" | grep -A1 "命名空间所有者" | tail -1 | sed 's/^[[:space:]]*//' | tr -d '\r')
+          DESCRIPTION=$(echo "$ISSUE_BODY" | grep -A100 "用途说明" | grep -B100 "确认事项" | head -n -1 | tail -n +2 | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          
+          # 验证命名空间名称格式
+          if ! echo "$NAMESPACE" | grep -qE '^[a-z][a-z0-9-]{1,29}$'; then
+            echo "::error::命名空间名称格式不合法: $NAMESPACE"
+            exit 1
+          fi
+          
+          # 检查是否为保留名称
+          if yq '.reserved_namespaces[]' permissions.yaml | grep -q "^${NAMESPACE}$"; then
+            echo "::error::命名空间 '$NAMESPACE' 是保留名称"
+            exit 1
+          fi
+          
+          # 检查是否已存在
+          EXISTS=$(yq '.namespaces | has("'$NAMESPACE'")' permissions.yaml)
+          if [ "$EXISTS" = "true" ]; then
+            echo "::error::命名空间 '$NAMESPACE' 已存在"
+            exit 1
+          fi
+          
+          echo "namespace=$NAMESPACE" >> $GITHUB_OUTPUT
+          echo "owner=$OWNER" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+
+      - name: Create branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b namespace/${{ steps.parse.outputs.namespace }}
+
+      - name: Update permissions.yaml
+        run: |
+          NAMESPACE="${{ steps.parse.outputs.namespace }}"
+          OWNER="${{ steps.parse.outputs.owner }}"
+          DESCRIPTION="${{ steps.parse.outputs.description }}"
+          TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          
+          # 添加新命名空间
+          yq -i '.namespaces.'$NAMESPACE' = {
+            "owners": ["'$OWNER'"],
+            "maintainers": [],
+            "status": "pending",
+            "created_at": "'$TIMESTAMP'",
+            "description": "'$DESCRIPTION'"
+          }' permissions.yaml
+          
+          cat permissions.yaml
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NAMESPACE="${{ steps.parse.outputs.namespace }}"
+          
+          git add permissions.yaml
+          git commit -m "Add namespace: $NAMESPACE"
+          git push -u origin namespace/$NAMESPACE
+          
+          gh pr create \
+            --title "Add namespace: $NAMESPACE" \
+            --body "## 命名空间申请
+
+- **命名空间**: $NAMESPACE
+- **所有者**: @${{ steps.parse.outputs.owner }}
+- **用途**: ${{ steps.parse.outputs.description }}
+- **申请 Issue**: #${{ github.event.issue.number }}
+
+合并此 PR 将激活命名空间。" \
+            --base main
+
+      - name: Comment on issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body "✅ 命名空间申请已审核通过
+
+PR 已创建，等待合并: 请查看 Pull Requests 列表
+
+合并后将自动激活命名空间。"
+
+  # PR 合并后激活命名空间并关闭 Issue
+  activate-namespace:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'namespace/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup tools
+        run: |
+          sudo apt-get install -y yq
+
+      - name: Extract namespace name
+        id: extract
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          NAMESPACE=$(echo "$BRANCH" | sed 's|namespace/||')
+          echo "namespace=$NAMESPACE" >> $GITHUB_OUTPUT
+
+      - name: Activate namespace
+        run: |
+          NAMESPACE="${{ steps.extract.outputs.namespace }}"
+          
+          # 更新状态为 active
+          yq -i '.namespaces.'$NAMESPACE'.status = "active"' permissions.yaml
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add permissions.yaml
+          git commit -m "Activate namespace: $NAMESPACE"
+          git push
+
+      - name: Find and close issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NAMESPACE="${{ steps.extract.outputs.namespace }}"
+          
+          # 查找相关 Issue
+          ISSUE_NUMBER=$(gh issue list \
+            --label namespace-request \
+            --search "$NAMESPACE" \
+            --state open \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+          
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment $ISSUE_NUMBER --body "🎉 命名空间 \`$NAMESPACE\` 已激活！
+
+你现在可以发布包到 \`$NAMESPACE/*\` 命名空间了。
+
+使用方法：
+\`\`\`bash
+dehub publish
+\`\`\`"
+            
+            gh issue close $ISSUE_NUMBER
+          fi

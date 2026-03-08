@@ -1,0 +1,22 @@
+# Dehub 命名空间权限配置
+# 此文件由自动化流程管理，请勿手动编辑
+
+schema_version: "1.0"
+
+# 保留命名空间（不可申请）
+reserved_namespaces:
+  - dehub
+  - official
+  - system
+  - default
+
+# 命名空间定义
+namespaces:
+  # Zyrthi 官方命名空间
+  zyrthi:
+    owners:
+      - hzx
+    maintainers: []
+    status: active
+    created_at: "2026-03-08T00:00:00Z"
+    description: "Zyrthi 嵌入式框架官方包"
