@@ -100,8 +100,8 @@ jobs:
           INDEX_FILE="packages/${PACKAGE}/index.json"
           
           if [ -f "$INDEX_FILE" ]; then
-            # 检查版本是否已存在
-            EXISTS=$(jq -r '.versions[] | select(.version == "'$VERSION'") | .version' "$INDEX_FILE" 2>/dev/null || echo "")
+            # 检查版本是否已存在 (使用 jq --arg 传递变量)
+            EXISTS=$(jq -r --arg ver "$VERSION" '.versions[]? | select(.version == $ver) | .version' "$INDEX_FILE" 2>/dev/null || echo "")
             
             if [ -n "$EXISTS" ]; then
               echo "::error::版本 '$VERSION' 已存在，无法覆盖"
