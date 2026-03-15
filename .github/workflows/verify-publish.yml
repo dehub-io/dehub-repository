@@ -30,7 +30,10 @@ jobs:
 
       - name: Setup tools
         run: |
-          sudo apt-get install -y yq
+          # 安装 Go 版本的 yq (mikefarah/yq)
+          wget -qO- https://github.com/mikefarah/yq/releases/download/v4.35.1/yq_linux_amd64.tar.gz | tar xz -C /tmp
+          sudo mv /tmp/yq_linux_amd64 /usr/local/bin/yq
+          yq --version
 
       - name: Validate permissions
         id: validate
