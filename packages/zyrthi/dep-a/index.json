@@ -1,9 +1,16 @@
 {
   "schema_version": "1.0",
   "package": "zyrthi/dep-a",
-  "versions": [{
-    "version": "1.0.0",
-    "archive_url": "https://github.com/dehub-io/dehub-repository/releases/download/zyrthi/dep-a/1.0.0/package.tar.gz",
-    "release_date": "2026-03-15T16:02:51Z"
-  }]
+  "versions": [
+    {
+      "version": "1.0.0",
+      "archive_url": "https://github.com/dehub-io/dehub-repository/releases/download/zyrthi/dep-a/1.0.0/package.tar.gz",
+      "release_date": "2026-03-15T16:02:51Z"
+    },
+    {
+      "version": "1.0.1",
+      "archive_url": "https://github.com/dehub-io/dehub-repository/releases/download/zyrthi/dep-a/1.0.1/package.tar.gz",
+      "release_date": "2026-03-15T16:10:26Z"
+    }
+  ]
 }
