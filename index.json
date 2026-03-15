@@ -5,7 +5,8 @@
     "zyrthi/dep-c",
     "zyrthi/dep-b",
     "zyrthi/dep-a",
-    "zyrthi/hal"
+    "zyrthi/hal",
+    "zyrthi/core"
   ],
-  "updated_at": "2026-03-15T16:27:11Z"
+  "updated_at": "2026-03-15T16:27:40Z"
 }
