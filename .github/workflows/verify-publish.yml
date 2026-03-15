@@ -51,8 +51,8 @@ jobs:
             exit 1
           fi
           
-          # 检查命名空间状态
-          STATUS=$(yq '.namespaces.'$NAMESPACE'.status // "not_found"' permissions.yaml)
+          # 检查命名空间状态 (yq v4 语法)
+          STATUS=$(yq e ".namespaces[\"$NAMESPACE\"].status // \"not_found\"" permissions.yaml)
           
           if [ "$STATUS" = "not_found" ]; then
             echo "::error::命名空间 '$NAMESPACE' 不存在，请先申请"
@@ -65,8 +65,8 @@ jobs:
           fi
           
           # 检查用户权限
-          OWNERS=$(yq '.namespaces.'$NAMESPACE'.owners[]' permissions.yaml 2>/dev/null || echo "")
-          MAINTAINERS=$(yq '.namespaces.'$NAMESPACE'.maintainers[]' permissions.yaml 2>/dev/null || echo "")
+          OWNERS=$(yq e ".namespaces[\"$NAMESPACE\"].owners[]" permissions.yaml 2>/dev/null || echo "")
+          MAINTAINERS=$(yq e ".namespaces[\"$NAMESPACE\"].maintainers[]" permissions.yaml 2>/dev/null || echo "")
           
           HAS_PERMISSION=false
           
