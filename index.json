@@ -3,7 +3,8 @@
   "packages": [
     "zyrthi/hello",
     "zyrthi/dep-c",
-    "zyrthi/dep-b"
+    "zyrthi/dep-b",
+    "zyrthi/dep-a"
   ],
-  "updated_at": "2026-03-15T16:02:21Z"
+  "updated_at": "2026-03-15T16:02:51Z"
 }
